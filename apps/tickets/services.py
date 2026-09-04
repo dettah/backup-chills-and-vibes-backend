@@ -11,6 +11,20 @@ from io import BytesIO
 import qrcode
 
 
+def build_ticket_verification_url(
+    ticket_hash: str
+) -> str:
+    """
+    Builds the canonical public verification URL embedded
+    inside every Chill & Vibes ticket QR code.
+    """
+
+    return (
+        f"https://chillandvibes.com"
+        f"/tickets/verify/{ticket_hash}"
+    )
+
+
 def generate_qr_code_url(ticket_hash: str) -> str:
     """
     Generates a QR image URL for a ticket.
@@ -19,7 +33,9 @@ def generate_qr_code_url(ticket_hash: str) -> str:
     """
 
     verification_payload = (
-        f"https://chillandvibes.com/tickets/verify/{ticket_hash}"
+        build_ticket_verification_url(
+            ticket_hash
+        )
     )
 
     encoded_data = urllib.parse.quote(
@@ -39,7 +55,9 @@ def generate_qr_code_image(ticket_hash: str) -> BytesIO:
     """
 
     verification_payload = (
-        f"https://chillandvibes.com/tickets/verify/{ticket_hash}"
+        build_ticket_verification_url(
+            ticket_hash
+        )
     )
 
     qr = qrcode.QRCode(
@@ -74,7 +92,7 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
         )
         .get(order_hash=order_hash)
     )
-    
+
     if order.status != "PAID":
         return 0
     if order.email_sent:
@@ -202,7 +220,7 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
             content,
             mimetype
         )
-        
+
      # Actually send the email.
     sent_count = email.send()
 

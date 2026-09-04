@@ -10,6 +10,7 @@ from apps.events.views import (
 )
 
 from apps.orders.views import (
+    GuestOrderTicketsAPIView,
     ReserveTicketAPIView,
     CheckoutInitializeAPIView,
     GuestOrderLookupAPIView,
@@ -81,7 +82,11 @@ urlpatterns = [
         name="api-guest-lookup",
     ),
 
-
+    path(
+        "api/v1/orders/tickets/",
+        GuestOrderTicketsAPIView.as_view(),
+        name="api-guest-tickets",
+    ),
 
     # ============================================================
     # PAYMENT WEBHOOK

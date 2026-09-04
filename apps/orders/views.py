@@ -1,6 +1,6 @@
 # orders/views.py
 import requests
-
+from django.db.models import Prefetch
 from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -13,6 +13,13 @@ from apps.tickets.services import dispatch_ticket_delivery_email
 from django.core.exceptions import ValidationError, PermissionDenied
 from apps.orders.services import reserve_tickets_atomic, initialize_checkout_order, prepare_payment_gateway_payload
 from apps.orders.selectors import get_order_by_guest_hash
+from requests.exceptions import (
+    Timeout,
+    ConnectionError as RequestsConnectionError,
+    RequestException,
+)
+
+
 
 
 class ReserveTicketAPIView(APIView):
@@ -134,6 +141,103 @@ class GuestOrderLookupAPIView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
 
 
+class GuestOrderTicketsAPIView(APIView):
+    """
+    Returns the individual tickets generated for a paid order.
+
+    The guest must provide both:
+        - order_hash
+        - customer email
+
+    This prevents someone from retrieving another customer's tickets
+    using only an order reference.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+
+        order_hash = request.query_params.get(
+            "order_hash"
+        )
+
+        email = request.query_params.get(
+            "email"
+        )
+
+        if not order_hash or not email:
+            return Response(
+                {
+                    "error": (
+                        "order_hash and email are required."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+
+            order = (
+                Order.objects
+                .prefetch_related(
+                    "items__tickets",
+                    "items__ticket_type",
+                )
+                .get(
+                    order_hash=order_hash,
+                    customer_email__iexact=email.strip(),
+                )
+            )
+
+        except Order.DoesNotExist:
+
+            return Response(
+                {
+                    "error": "Order not found."
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if order.status != "PAID":
+
+            return Response(
+                {
+                    "error": (
+                        "Tickets are not available until "
+                        "payment has been confirmed."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        tickets = []
+
+        for item in order.items.all():
+
+            for ticket in item.tickets.all():
+
+                tickets.append(
+                    {
+                        "ticket_hash": ticket.ticket_hash,
+                        "status": ticket.status,
+                        "ticket_type": item.ticket_type.name,
+                        "price": str(
+                            item.price_at_purchase
+                        ),
+                    }
+                )
+
+        return Response(
+            {
+                "order_hash": order.order_hash,
+                "customer_email": order.customer_email,
+                "tickets": tickets,
+            },
+            status=status.HTTP_200_OK
+        )
+
+
 class VerifyPaystackTransactionAPIView(APIView):
     """
     Verifies a Paystack transaction directly from Django.
@@ -180,18 +284,78 @@ class VerifyPaystackTransactionAPIView(APIView):
             paystack_response = requests.get(
                 f"https://api.paystack.co/transaction/verify/{reference}",
                 headers={
-                    "Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}",
-                    "Cache-Control": "no-cache",
-                },
-                timeout=15,
+                    "Authorization": (
+                        f"Bearer {settings.PAYSTACK_SECRET_KEY}"
+                    ),
+            "Cache-Control": "no-cache",
+            },
+                timeout=(5, 15),
             )
-        except requests.RequestException:
+
+            print(
+                "PAYSTACK VERIFY STATUS:",
+                paystack_response.status_code
+            )
+
+            print(
+                "PAYSTACK VERIFY BODY:",
+                paystack_response.text[:2000]
+            )
+
+        except Timeout:
             return Response(
                 {
-                    "error": "Unable to contact Paystack."
+                    "error": (
+                        "Paystack verification timed out. "
+                        "Please try again shortly."
+                    )
                 },
-                status=status.HTTP_502_BAD_GATEWAY
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
             )
+
+        except RequestsConnectionError:
+            return Response(
+                {
+                    "error": (
+                        "Paystack verification timed out. "
+                        "Please try again shortly."
+                    )
+                },
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+
+        except RequestsConnectionError:
+            return Response(
+                {
+                    "error": (
+                        "Django could not connect to Paystack."
+                )
+            },
+            status=status.HTTP_504_GATEWAY_TIMEOUT,
+        )
+
+        except RequestsConnectionError:
+            return Response(
+                {
+                    "error": (
+                        "Django could not connect to Paystack."
+                    )
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        except RequestException as exc:
+            return Response(
+                {
+                    "error": (
+                        "Paystack verification request failed."
+                    ),
+                    "detail": str(exc),
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
 
         if paystack_response.status_code != 200:
             return Response(
