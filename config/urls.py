@@ -14,7 +14,7 @@ from apps.orders.views import (
     ReserveTicketAPIView,
     CheckoutInitializeAPIView,
     GuestOrderLookupAPIView,
-    VerifyPaystackTransactionAPIView,
+    VerifyMonnifyTransactionAPIView,
 )
 
 from apps.orders.webhooks import (
@@ -72,8 +72,8 @@ urlpatterns = [
 
     path(
         'api/v1/orders/verify-payment/',
-        VerifyPaystackTransactionAPIView.as_view(),
-        name='api-verify-paystack-payment'
+        VerifyMonnifyTransactionAPIView.as_view(),
+        name='api-verify-monnify-payment'
     ),
 
     path(

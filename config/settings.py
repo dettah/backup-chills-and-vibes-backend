@@ -124,8 +124,20 @@ USE_I18N = True
 
 USE_TZ = True
 
-# Paystack settings
-PAYSTACK_SECRET_KEY = config("PAYSTACK_SECRET_KEY")
+# Monnify settings
+MONNIFY_API_KEY = config("MONNIFY_API_KEY")
+MONNIFY_SECRET_KEY = config("MONNIFY_SECRET_KEY")
+MONNIFY_CONTRACT_CODE = config("MONNIFY_CONTRACT_CODE")
+
+MONNIFY_BASE_URL = config(
+    "MONNIFY_BASE_URL",
+    default="https://sandbox.monnify.com"
+)
+
+MONNIFY_ENVIRONMENT = config(
+    "MONNIFY_ENVIRONMENT",
+    default="sandbox"
+)
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
