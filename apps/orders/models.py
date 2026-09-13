@@ -17,6 +17,17 @@ class Order(TimeStampedModel):
 
     customer_email = models.EmailField(db_index=True)
 
+    customer_name = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    customer_phone = models.CharField(
+        max_length=30,
+        blank=True,
+    )
+
+
     order_hash = models.CharField(
         max_length=64,
         unique=True,

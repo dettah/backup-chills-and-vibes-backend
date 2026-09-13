@@ -70,6 +70,17 @@ class CheckoutInitializeAPIView(APIView):
     def post(self, request):
 
         email = request.data.get("email")
+
+        customer_name = request.data.get(
+            "customer_name",
+            ""
+        ).strip()
+
+        customer_phone = request.data.get(
+            "customer_phone",
+            ""
+        ).strip()
+
         hold_ids = request.data.get(
             "hold_ids",
             []
@@ -109,8 +120,9 @@ class CheckoutInitializeAPIView(APIView):
             order = initialize_checkout_order(
                 email=email,
                 hold_ids=hold_ids,
+                customer_name=customer_name,
+                customer_phone=customer_phone,
             )
-
 
             # ====================================================
             # 2. INITIALIZE MONNIFY
@@ -122,7 +134,6 @@ class CheckoutInitializeAPIView(APIView):
                     redirect_url=callback_url,
                 )
             )
-
 
             # ====================================================
             # 3. STORE OUR PAYMENT REFERENCE
@@ -139,7 +150,6 @@ class CheckoutInitializeAPIView(APIView):
                     "payment_reference"
                 ]
             )
-
 
             return Response(
                 {
@@ -195,6 +205,7 @@ class CheckoutInitializeAPIView(APIView):
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
 
 class GuestOrderLookupAPIView(APIView):
     """Secure endpoint for frontends to query public receipt states using tracking tokens."""
@@ -361,7 +372,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-
         # ========================================================
         # IDEMPOTENCY
         # ========================================================
@@ -382,13 +392,11 @@ class VerifyMonnifyTransactionAPIView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-
         try:
 
             transaction_data = (
                 verify_monnify_transaction(
-                    payment_reference=
-                    payment_reference
+                    payment_reference=payment_reference
                 )
             )
 
@@ -414,7 +422,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-
         # ========================================================
         # REFERENCE VALIDATION
         # ========================================================
@@ -439,7 +446,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-
         # ========================================================
         # AMOUNT VALIDATION
         # ========================================================
@@ -463,7 +469,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
             order.total_price
         )
 
-
         # ========================================================
         # PAYMENT STATUS
         # ========================================================
@@ -481,7 +486,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-
         # ========================================================
         # AMOUNT
         # ========================================================
@@ -498,7 +502,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-
         # ========================================================
         # FULFILL
         # ========================================================
@@ -509,7 +512,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
             )
         )
 
-
         # ========================================================
         # EMAIL
         # ========================================================
@@ -519,7 +521,6 @@ class VerifyMonnifyTransactionAPIView(APIView):
             dispatch_ticket_delivery_email(
                 order_hash=order.order_hash
             )
-
 
         return Response(
             {
@@ -534,4 +535,4 @@ class VerifyMonnifyTransactionAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
-# 
+#

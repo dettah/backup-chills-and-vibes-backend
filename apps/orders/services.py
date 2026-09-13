@@ -68,6 +68,7 @@ def get_monnify_access_token() -> str:
 
     return access_token
 
+
 def initialize_monnify_transaction(
     order: Order,
     redirect_url: str,
@@ -174,6 +175,7 @@ def initialize_monnify_transaction(
         "currency": "NGN",
     }
 
+
 def verify_monnify_transaction(
     payment_reference: str,
 ) -> Dict[str, Any]:
@@ -225,6 +227,7 @@ def verify_monnify_transaction(
         )
 
     return transaction
+
 
 def reserve_tickets_atomic(email: str, ticket_type_id: int, quantity: int, hold_duration_minutes: int = 10) -> TicketHold:
     """
@@ -297,7 +300,12 @@ def release_expired_holds_atomic() -> int:
     return processed_count
 
 
-def initialize_checkout_order(email: str, hold_ids: List[int]) -> Order:
+def initialize_checkout_order(
+    email: str,
+    hold_ids: List[int],
+    customer_name: str = "",
+    customer_phone: str = "",
+) -> Order:
     """
     Validates a collection of active ticket holds, aggregates their pricing metrics,
     and commits a verified pending master Order with itemized line breakdowns.
@@ -324,8 +332,10 @@ def initialize_checkout_order(email: str, hold_ids: List[int]) -> Order:
         # Create the base master order record first
         order = Order.objects.create(
             customer_email=email.strip().lower(),
-            status='PENDING',
-            total_price=Decimal('0.00')
+            customer_name=customer_name.strip(),
+            customer_phone=customer_phone.strip(),
+            status="PENDING",
+            total_price=Decimal("0.00"),
         )
 
         calculated_running_total = Decimal('0.00')
@@ -408,6 +418,7 @@ def verify_monnify_webhook_signature(
         computed_signature,
         signature,
     )
+
 
 def fulfill_successful_order(order_hash: str):
     """
