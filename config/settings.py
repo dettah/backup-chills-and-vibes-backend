@@ -151,15 +151,43 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
-DEFAULT_FROM_EMAIL = config(
-    "DEFAULT_FROM_EMAIL",
-    default="tickets@chillandvibes.com",
+RESEND_API_KEY = config("RESEND_API_KEY")
+RESEND_SMTP_HOST = config(
+    "RESEND_SMTP_HOST",
+    default="smtp.resend.com",
 )
+RESEND_SMTP_PORT = config(
+    "RESEND_SMTP_PORT",
+    default=587,
+    cast=int,
+)
+RESEND_SMTP_USERNAME = config(
+    "RESEND_SMTP_USERNAME",
+    default="resend",
+)
+
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend"
+)
+
+EMAIL_HOST = RESEND_SMTP_HOST
+
+EMAIL_PORT = RESEND_SMTP_PORT
+
+EMAIL_HOST_USER = RESEND_SMTP_USERNAME
+
+EMAIL_HOST_PASSWORD = RESEND_API_KEY
+
+EMAIL_USE_TLS = True
+
+DEFAULT_FROM_EMAIL = (
+    "Chill & Vibes <onboarding@resend.dev>"
+)
+
+# DEFAULT_FROM_EMAIL = config(
+#     "DEFAULT_FROM_EMAIL",
+#     default="tickets@chillandvibes.com",
+# )
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
