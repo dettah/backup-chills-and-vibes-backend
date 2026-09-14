@@ -1,11 +1,15 @@
 asgiref==3.12.1
 certifi==2026.7.22
 charset-normalizer==3.5.1
+dj-database-url==3.1.2
 Django==6.1
 django-cors-headers==4.9.0
 djangorestframework==3.18.0
+gunicorn==26.2.0
 idna==3.19
 pillow==12.3.0
+psycopg==3.3.5
+psycopg-binary==3.3.5
 python-decouple==3.8
 qrcode==8.2
 requests==2.34.2
@@ -13,3 +17,4 @@ resend==2.44.0
 sqlparse==0.6.0
 typing_extensions==4.16.0
 urllib3==2.7.0
+whitenoise==6.12.0
