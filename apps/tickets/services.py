@@ -10,7 +10,8 @@ from django.db import transaction
 from io import BytesIO
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
-
+import base64
+import resend
 
 def build_ticket_verification_url(
     ticket_hash: str
@@ -424,7 +425,8 @@ def generate_ticket_image(
 
 def dispatch_ticket_delivery_email(order_hash: str) -> int:
     """
-    Sends a completed order receipt containing individual QR ticket images.
+    Sends a completed order receipt through the Resend API
+    with each ticket attached as an individual PNG image.
     """
 
     order = (
@@ -438,10 +440,26 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
 
     if order.status != "PAID":
         return 0
+
     if order.email_sent:
         return 0
 
-    subject = "Your Chill & Vibes Tickets Are Ready! 🎟️"
+    resend_api_key = getattr(
+        settings,
+        "RESEND_API_KEY",
+        ""
+    )
+
+    if not resend_api_key:
+        raise RuntimeError(
+            "RESEND_API_KEY is not configured."
+        )
+
+    resend.api_key = resend_api_key
+
+    subject = (
+        "Your Chill & Vibes Tickets Are Ready! 🎟️"
+    )
 
     ticket_counter = 1
 
@@ -457,8 +475,11 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
 
     html_body = f"""
     <html>
-        <body>
-            <h2>Your Chill & Vibes Tickets Are Ready! 🎟️</h2>
+        <body style="font-family: Arial, sans-serif;">
+
+            <h2>
+                Your Chill & Vibes Tickets Are Ready! 🎟️
+            </h2>
 
             <p>
                 Thank you for choosing Chill & Vibes.
@@ -483,6 +504,7 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
     attachments = []
 
     for item in order.items.all():
+
         for ticket in item.tickets.all():
 
             event = item.ticket_type.event
@@ -505,16 +527,22 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
                 total_paid=f"{order.total_price:,.2f}",
             )
 
+            ticket_bytes = ticket_buffer.getvalue()
+
+            # Resend accepts attachment content as base64.
+            ticket_base64 = base64.b64encode(
+                ticket_bytes
+            ).decode("utf-8")
+
             filename = (
                 f"chill-vibes-ticket-{ticket_counter}.png"
             )
 
             attachments.append(
-                (
-                    filename,
-                    ticket_buffer.getvalue(),
-                    "image/png"
-                )
+                {
+                    "filename": filename,
+                    "content": ticket_base64,
+                }
             )
 
             text_body += (
@@ -525,17 +553,23 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
 
             html_body += f"""
                 <div>
-                    <h4>Ticket #{ticket_counter}</h4>
+                    <h4>
+                        Ticket #{ticket_counter}
+                    </h4>
+
                     <p>
                         <strong>Type:</strong>
                         {item.ticket_type.name}
                     </p>
+
                     <p>
-                        Ticket ID:
+                        <strong>Ticket ID:</strong>
                         {ticket.ticket_hash}
                     </p>
+
                     <p>
-                        Your QR code is attached to this email.
+                        Your complete ticket is attached
+                        to this email as a PNG image.
                     </p>
                 </div>
 
@@ -546,7 +580,9 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
 
     html_body += f"""
             <p>
-                <strong>Order Reference:</strong>
+                <strong>
+                    Order Reference:
+                </strong>
                 {order.order_hash}
             </p>
 
@@ -554,50 +590,42 @@ def dispatch_ticket_delivery_email(order_hash: str) -> int:
                 Enjoy the show!<br>
                 The Chill & Vibes Team
             </p>
+
         </body>
     </html>
     """
 
-    email = EmailMultiAlternatives(
-        subject=subject,
-        body=text_body,
-        from_email=getattr(
+    params = {
+        "from": getattr(
             settings,
             "DEFAULT_FROM_EMAIL",
             "tickets@chillandvibes.com"
         ),
-        to=[order.customer_email],
-    )
+        "to": [order.customer_email],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body,
+        "attachments": attachments,
+    }
 
-    email.attach_alternative(
-        html_body,
-        "text/html"
-    )
+    response = resend.Emails.send(params)
 
-    for filename, content, mimetype in attachments:
-        email.attach(
-            filename,
-            content,
-            mimetype
+    if not response:
+        raise RuntimeError(
+            "Resend did not return a response."
         )
 
-     # Actually send the email.
-    sent_count = email.send()
+    order.email_sent = True
+    order.email_sent_at = timezone.now()
 
-    # Only mark as sent if Django's email backend reports success.
-    if sent_count > 0:
-        order.email_sent = True
-        order.email_sent_at = timezone.now()
+    order.save(
+        update_fields=[
+            "email_sent",
+            "email_sent_at",
+        ]
+    )
 
-        order.save(
-            update_fields=[
-                "email_sent",
-                "email_sent_at"
-            ]
-        )
-
-    return sent_count
-
+    return 1
 
 def validate_and_redeem_ticket_gate(ticket_hash: str) -> Ticket:
     """

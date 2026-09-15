@@ -517,10 +517,15 @@ class VerifyMonnifyTransactionAPIView(APIView):
         # ========================================================
 
         if was_newly_paid:
-
-            dispatch_ticket_delivery_email(
-                order_hash=order.order_hash
-            )
+            try:
+                dispatch_ticket_delivery_email(
+                    order_hash=order.order_hash
+                )
+            except Exception as exc:
+                print(
+                    "Ticket email delivery failed:",
+                    exc
+                )
 
         return Response(
             {
