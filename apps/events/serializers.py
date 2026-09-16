@@ -73,6 +73,7 @@ class EventItemSerializer(serializers.ModelSerializer):
             "flyer",
             "priceFrom",
             "ticketsAvailable",
+            "is_featured",
         ]
 
     def get_slug(self, obj):
