@@ -201,8 +201,9 @@ EMAIL_HOST_PASSWORD = RESEND_API_KEY
 
 EMAIL_USE_TLS = True
 
-DEFAULT_FROM_EMAIL = (
-    "Chill & Vibes <onboarding@resend.dev>"
+DEFAULT_FROM_EMAIL = config(
+    "DEFAULT_FROM_EMAIL",
+    default="Chill & Vibes <tickets@chillandvibeshub.com>",
 )
 
 # DEFAULT_FROM_EMAIL = config(
