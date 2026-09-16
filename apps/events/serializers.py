@@ -99,12 +99,26 @@ class EventItemSerializer(serializers.ModelSerializer):
         return obj.ticket_types.filter(
             quantity_available__gt=0
         ).exists()
-
+        
     def get_flyer(self, obj):
-        """
-        Temporary flyer until Event has an actual image field.
-        """
-        return "https://images.unsplash.com/photo-1492684223066-81342ee5ff30"
+        if not obj.flyer:
+            return None
+
+        request = self.context.get("request")
+
+        if request:
+            return request.build_absolute_uri(
+                obj.flyer.url
+            )
+
+        return obj.flyer.url
+    
+
+    # def get_flyer(self, obj):
+    #     """
+    #     Temporary flyer until Event has an actual image field.
+    #     """
+    #     return "https://images.unsplash.com/photo-1492684223066-81342ee5ff30"
 
 
 class EventDetailSerializer(EventItemSerializer):
