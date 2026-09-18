@@ -11,9 +11,13 @@ class TicketTypeSerializer(serializers.ModelSerializer):
         source="name",
         read_only=True,
     )
-
-    description = serializers.SerializerMethodField()
-    perks = serializers.SerializerMethodField()
+    description = serializers.CharField(
+        read_only=True
+    )
+    perks = serializers.ListField(
+        child=serializers.CharField(),
+        read_only=True,
+    )
     price = serializers.SerializerMethodField()
 
     class Meta:
@@ -24,19 +28,21 @@ class TicketTypeSerializer(serializers.ModelSerializer):
             "description",
             "price",
             "perks",
+            "highlight",
         ]
 
-    def get_description(self, obj):
-        return f"{obj.name} ticket"
+    # def get_description(self, obj):
+    #     return f"{obj.name} ticket"
 
-    def get_perks(self, obj):
-        return [
-            "Event entry",
-            f"{obj.quantity_available} tickets remaining",
-        ]
+    # def get_perks(self, obj):
+    #     return [
+    #         "Event entry",
+    #         f"{obj.quantity_available} tickets remaining",
+    #     ]
 
     def get_price(self, obj):
         return float(obj.price)
+
 
 class EventItemSerializer(serializers.ModelSerializer):
     """
@@ -100,7 +106,7 @@ class EventItemSerializer(serializers.ModelSerializer):
         return obj.ticket_types.filter(
             quantity_available__gt=0
         ).exists()
-        
+
     def get_flyer(self, obj):
         if not obj.flyer:
             return None
@@ -113,7 +119,6 @@ class EventItemSerializer(serializers.ModelSerializer):
             )
 
         return obj.flyer.url
-    
 
     # def get_flyer(self, obj):
     #     """
