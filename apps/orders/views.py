@@ -8,14 +8,15 @@ from rest_framework import status
 
 from apps.orders.models import Order
 from decimal import Decimal
+
 from apps.orders.services import (
     fulfill_successful_order,
     reserve_tickets_atomic,
     initialize_checkout_order,
-    initialize_monnify_transaction,
-    verify_monnify_transaction,
-    verify_monnify_webhook_signature,
+    initialize_paystack_transaction,
+    verify_paystack_transaction,
 )
+
 
 from apps.tickets.services import dispatch_ticket_delivery_email
 
@@ -60,63 +61,41 @@ class ReserveTicketAPIView(APIView):
 
 class CheckoutInitializeAPIView(APIView):
     """
-    Creates a pending order and initializes a Monnify
-    hosted checkout transaction.
+    Creates a pending order and initializes Paystack hosted checkout.
     """
 
     authentication_classes = []
     permission_classes = []
 
     def post(self, request):
-
         email = request.data.get("email")
 
-        customer_name = request.data.get(
-            "customer_name",
-            ""
+        customer_name = (
+            request.data.get("customer_name") or ""
         ).strip()
 
-        customer_phone = request.data.get(
-            "customer_phone",
-            ""
+        customer_phone = (
+            request.data.get("customer_phone") or ""
         ).strip()
 
-        hold_ids = request.data.get(
-            "hold_ids",
-            []
-        )
+        hold_ids = request.data.get("hold_ids") or []
 
-        callback_url = request.data.get(
-            "callback_url",
-            "http://localhost:5173/checkout"
-        )
+        callback_url = settings.PAYSTACK_CALLBACK_URL
 
         if not email:
             return Response(
-                {
-                    "error": (
-                        "Customer email is required."
-                    )
-                },
+                {"error": "Customer email is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not hold_ids:
+        if not isinstance(hold_ids, list) or not hold_ids:
             return Response(
-                {
-                    "error": (
-                        "At least one hold_id is required."
-                    )
-                },
+                {"error": "At least one hold_id is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-
-            # ====================================================
-            # 1. CREATE OUR PENDING ORDER
-            # ====================================================
-
+            # 1. Create the pending order using existing hold logic.
             order = initialize_checkout_order(
                 email=email,
                 hold_ids=hold_ids,
@@ -124,60 +103,35 @@ class CheckoutInitializeAPIView(APIView):
                 customer_phone=customer_phone,
             )
 
-            # ====================================================
-            # 2. INITIALIZE MONNIFY
-            # ====================================================
-
-            monnify_transaction = (
-                initialize_monnify_transaction(
-                    order=order,
-                    redirect_url=callback_url,
-                )
+            # 2. Initialize Paystack hosted checkout.
+            paystack_transaction = initialize_paystack_transaction(
+                order=order,
+                redirect_url=callback_url,
             )
 
-            # ====================================================
-            # 3. STORE OUR PAYMENT REFERENCE
-            # ====================================================
-
+            # 3. Save Paystack's reference to the existing order.
             order.payment_reference = (
-                monnify_transaction[
-                    "payment_reference"
-                ]
+                paystack_transaction["payment_reference"]
             )
 
-            order.save(
-                update_fields=[
-                    "payment_reference"
-                ]
-            )
+            order.save(update_fields=["payment_reference"])
 
+            # 4. Preserve the frontend's existing response contract.
             return Response(
                 {
                     "order_hash": order.order_hash,
-                    "total_price": str(
-                        order.total_price
-                    ),
+                    "total_price": str(order.total_price),
                     "gateway_config": {
                         "payment_reference": (
-                            monnify_transaction[
-                                "payment_reference"
-                            ]
+                            paystack_transaction["payment_reference"]
                         ),
                         "transaction_reference": (
-                            monnify_transaction[
-                                "transaction_reference"
-                            ]
+                            paystack_transaction["transaction_reference"]
                         ),
                         "checkout_url": (
-                            monnify_transaction[
-                                "checkout_url"
-                            ]
+                            paystack_transaction["checkout_url"]
                         ),
-                        "amount": (
-                            monnify_transaction[
-                                "amount"
-                            ]
-                        ),
+                        "amount": paystack_transaction["amount"],
                         "currency": "NGN",
                     },
                 },
@@ -185,26 +139,22 @@ class CheckoutInitializeAPIView(APIView):
             )
 
         except ValidationError as exc:
-
             return Response(
-                {
-                    "error": str(exc)
-                },
+                {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        except requests.RequestException as exc:
-
+        except requests.RequestException:
             return Response(
                 {
                     "error": (
-                        "Unable to communicate "
-                        "with Monnify."
-                    ),
-                    "detail": str(exc),
+                        "Unable to communicate with Paystack. "
+                        "Please try again."
+                    )
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
 
 
 class GuestOrderLookupAPIView(APIView):
@@ -328,194 +278,136 @@ class GuestOrderTicketsAPIView(APIView):
         )
 
 
-class VerifyMonnifyTransactionAPIView(APIView):
-    """
-    Verifies a Monnify payment directly against the Monnify API.
 
-    The frontend redirect/callback is NOT trusted as proof of payment.
+class VerifyPaystackTransactionAPIView(APIView):
+    """
+    Verifies a payment directly against Paystack.
+    The frontend callback is not proof of payment.
     """
 
     authentication_classes = []
     permission_classes = []
 
     def post(self, request):
-
         payment_reference = request.data.get(
             "payment_reference"
         )
 
         if not payment_reference:
             return Response(
-                {
-                    "error": (
-                        "Payment reference is required."
-                    )
-                },
+                {"error": "Payment reference is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-
             order = Order.objects.get(
                 payment_reference=payment_reference
             )
-
         except Order.DoesNotExist:
-
             return Response(
                 {
                     "error": (
-                        "No order was found for "
-                        "this payment reference."
+                        "No order was found for this "
+                        "payment reference."
                     )
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # ========================================================
-        # IDEMPOTENCY
-        # ========================================================
-
+        # Idempotency: never fulfill the same order twice.
         if order.status == "PAID":
-
             return Response(
                 {
                     "status": "success",
                     "message": (
-                        "Payment has already "
-                        "been confirmed."
+                        "Payment has already been confirmed."
                     ),
-                    "order_hash": (
-                        order.order_hash
-                    ),
+                    "order_hash": order.order_hash,
                 },
                 status=status.HTTP_200_OK,
             )
 
         try:
-
-            transaction_data = (
-                verify_monnify_transaction(
-                    payment_reference=payment_reference
-                )
+            transaction_data = verify_paystack_transaction(
+                payment_reference=payment_reference
             )
 
-        except requests.RequestException as exc:
-
+        except requests.RequestException:
             return Response(
                 {
                     "error": (
-                        "Unable to verify payment "
-                        "with Monnify."
-                    ),
-                    "detail": str(exc),
+                        "Unable to verify payment with Paystack."
+                    )
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
         except ValidationError as exc:
-
             return Response(
-                {
-                    "error": str(exc)
-                },
+                {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ========================================================
-        # REFERENCE VALIDATION
-        # ========================================================
+        # Validate the reference returned by Paystack.
+        returned_reference = transaction_data.get("reference")
 
-        returned_payment_reference = (
-            transaction_data.get(
-                "paymentReference"
-            )
-        )
-
-        if (
-            returned_payment_reference
-            != order.payment_reference
-        ):
-
+        if returned_reference != order.payment_reference:
             return Response(
-                {
-                    "error": (
-                        "Payment reference mismatch."
-                    )
-                },
+                {"error": "Payment reference mismatch."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ========================================================
-        # AMOUNT VALIDATION
-        # ========================================================
-
-        payment_status = (
-            transaction_data.get(
-                "paymentStatus"
-            )
-        )
-
-        amount_paid = Decimal(
-            str(
-                transaction_data.get(
-                    "amountPaid",
-                    "0",
-                )
-            )
-        )
-
-        expected_amount = (
-            order.total_price
-        )
-
-        # ========================================================
-        # PAYMENT STATUS
-        # ========================================================
-
-        if payment_status != "PAID":
-
+        # The transaction must have succeeded.
+        if transaction_data.get("status") != "success":
             return Response(
                 {
-                    "status": payment_status,
+                    "status": transaction_data.get("status"),
                     "message": (
-                        "Payment has not been "
-                        "completed."
+                        "Payment has not been completed."
                     ),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ========================================================
-        # AMOUNT
-        # ========================================================
+        # Validate the currency.
+        if transaction_data.get("currency") != "NGN":
+            return Response(
+                {"error": "Unexpected payment currency."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if amount_paid < expected_amount:
+        # Paystack reports NGN amounts in kobo.
+        amount_paid_kobo = transaction_data.get("amount")
 
+        try:
+            amount_paid_kobo = int(amount_paid_kobo)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Invalid payment amount returned."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        expected_amount_kobo = int(
+            order.total_price * Decimal("100")
+        )
+
+        if amount_paid_kobo != expected_amount_kobo:
             return Response(
                 {
                     "error": (
-                        "Payment amount does "
-                        "not match the order."
+                        "Payment amount does not match "
+                        "the order total."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ========================================================
-        # FULFILL
-        # ========================================================
-
-        order, was_newly_paid = (
-            fulfill_successful_order(
-                order_hash=order.order_hash
-            )
+        # Fulfill using the existing ticketing logic.
+        order, was_newly_paid = fulfill_successful_order(
+            order_hash=order.order_hash
         )
 
-        # ========================================================
-        # EMAIL
-        # ========================================================
-
+        # Email failure must not undo a successful payment.
         if was_newly_paid:
             try:
                 dispatch_ticket_delivery_email(
@@ -524,18 +416,14 @@ class VerifyMonnifyTransactionAPIView(APIView):
             except Exception as exc:
                 print(
                     "Ticket email delivery failed:",
-                    exc
+                    exc,
                 )
 
         return Response(
             {
                 "status": "success",
-                "message": (
-                    "Payment verified successfully."
-                ),
-                "order_hash": (
-                    order.order_hash
-                ),
+                "message": "Payment verified successfully.",
+                "order_hash": order.order_hash,
             },
             status=status.HTTP_200_OK,
         )

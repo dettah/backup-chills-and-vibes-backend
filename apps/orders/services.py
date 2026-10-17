@@ -11,194 +11,26 @@ from decimal import Decimal
 import hmac
 import hashlib
 import requests
-import base64
 
 
-def get_monnify_access_token() -> str:
-    """
-    Authenticates with Monnify and returns a temporary Bearer token.
-
-    Monnify access tokens are valid for approximately one hour.
-    For this project's current traffic level, obtaining a fresh token
-    when needed is acceptable. We can add caching later.
-    """
-
-    credentials = (
-        f"{settings.MONNIFY_API_KEY}:"
-        f"{settings.MONNIFY_SECRET_KEY}"
-    )
-
-    encoded_credentials = base64.b64encode(
-        credentials.encode("utf-8")
-    ).decode("utf-8")
-
-    response = requests.post(
-        f"{settings.MONNIFY_BASE_URL}/api/v1/auth/login",
-        headers={
-            "Authorization": (
-                f"Basic {encoded_credentials}"
-            ),
-            "Content-Type": "application/json",
-        },
-        timeout=(5, 15),
-    )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    if not data.get("requestSuccessful"):
-        raise ValidationError(
-            data.get(
-                "responseMessage",
-                "Monnify authentication failed."
-            )
-        )
-
-    access_token = (
-        data
-        .get("responseBody", {})
-        .get("accessToken")
-    )
-
-    if not access_token:
-        raise ValidationError(
-            "Monnify did not return an access token."
-        )
-
-    return access_token
 
 
-def initialize_monnify_transaction(
-    order: Order,
-    redirect_url: str,
-) -> Dict[str, Any]:
-    """
-    Creates a Monnify hosted-checkout transaction for an existing
-    PENDING order.
 
-    The Order.order_hash becomes our unique Monnify paymentReference.
-    """
-
-    if order.status != "PENDING":
-        raise ValidationError(
-            "Only pending orders can be sent to Monnify."
-        )
-
-    access_token = get_monnify_access_token()
-
-    payment_reference = order.order_hash
-
-    payload = {
-        "amount": float(order.total_price),
-        "customerEmail": order.customer_email,
-        "paymentReference": payment_reference,
-        "paymentDescription": (
-            "Chill & Vibes Event Ticket"
-        ),
-        "currencyCode": "NGN",
-        "contractCode": settings.MONNIFY_CONTRACT_CODE,
-        "redirectUrl": redirect_url,
-        "paymentMethods": [
-            "CARD",
-            "ACCOUNT_TRANSFER",
-            "USSD",
-            "PHONE_NUMBER",
-        ],
-        "metadata": {
-            "order_hash": order.order_hash,
-            "order_id": order.id,
-            "system_source": "chill_and_vibes",
-        },
-    }
-
-    response = requests.post(
-        (
-            f"{settings.MONNIFY_BASE_URL}"
-            "/api/v1/merchant/transactions/"
-            "init-transaction"
-        ),
-        headers={
-            "Authorization": (
-                f"Bearer {access_token}"
-            ),
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=(5, 20),
-    )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    if not data.get("requestSuccessful"):
-        raise ValidationError(
-            data.get(
-                "responseMessage",
-                "Monnify transaction initialization failed."
-            )
-        )
-
-    response_body = data.get(
-        "responseBody",
-        {}
-    )
-
-    checkout_url = response_body.get(
-        "checkoutUrl"
-    )
-
-    transaction_reference = response_body.get(
-        "transactionReference"
-    )
-
-    returned_payment_reference = response_body.get(
-        "paymentReference"
-    )
-
-    if not checkout_url:
-        raise ValidationError(
-            "Monnify did not return a checkout URL."
-        )
-
-    if returned_payment_reference != payment_reference:
-        raise ValidationError(
-            "Monnify payment reference mismatch."
-        )
-
-    return {
-        "payment_reference": payment_reference,
-        "transaction_reference": transaction_reference,
-        "checkout_url": checkout_url,
-        "amount": float(order.total_price),
-        "currency": "NGN",
-    }
-
-
-def verify_monnify_transaction(
+def verify_paystack_transaction(
     payment_reference: str,
-) -> Dict[str, Any]:
+) -> dict:
     """
-    Queries Monnify directly and returns the authoritative
-    transaction information.
-
-    Never trust the frontend redirect status by itself.
+    Verify a transaction directly with Paystack.
+    Never trust the frontend redirect as proof of payment.
     """
-
-    access_token = get_monnify_access_token()
-
     response = requests.get(
         (
-            f"{settings.MONNIFY_BASE_URL}"
-            "/api/v2/merchant/transactions/query"
+            "https://api.paystack.co/transaction/verify/"
+            f"{payment_reference}"
         ),
-        params={
-            "paymentReference": payment_reference,
-        },
         headers={
             "Authorization": (
-                f"Bearer {access_token}"
+                f"Bearer {settings.PAYSTACK_SECRET_KEY}"
             ),
         },
         timeout=(5, 15),
@@ -208,22 +40,19 @@ def verify_monnify_transaction(
 
     data = response.json()
 
-    if not data.get("requestSuccessful"):
+    if not data.get("status"):
         raise ValidationError(
             data.get(
-                "responseMessage",
-                "Monnify transaction verification failed."
+                "message",
+                "Paystack transaction verification failed.",
             )
         )
 
-    transaction = (
-        data
-        .get("responseBody")
-    )
+    transaction = data.get("data")
 
     if not transaction:
         raise ValidationError(
-            "Monnify returned no transaction data."
+            "Paystack returned no transaction data."
         )
 
     return transaction
@@ -387,26 +216,91 @@ def prepare_payment_gateway_payload(order: Order, redirect_url: str) -> Dict[str
         return payload
 
 
-def verify_monnify_webhook_signature(
+
+def initialize_paystack_transaction(
+    order,
+    redirect_url: str,
+) -> dict:
+    """
+    Initialize a Paystack hosted checkout transaction.
+
+    Paystack expects the transaction amount in kobo.
+    """
+
+    amount_kobo = int(
+        order.total_price * Decimal("100")
+    )
+
+    if amount_kobo <= 0:
+        raise ValidationError(
+            "The order amount must be greater than zero."
+        )
+
+    payload = {
+        "email": order.customer_email,
+        "amount": amount_kobo,
+        "currency": "NGN",
+        "callback_url": redirect_url,
+        "metadata": {
+            "order_hash": order.order_hash,
+        },
+    }
+
+    response = requests.post(
+        "https://api.paystack.co/transaction/initialize",
+        json=payload,
+        headers={
+            "Authorization": (
+                f"Bearer {settings.PAYSTACK_SECRET_KEY}"
+            ),
+            "Content-Type": "application/json",
+        },
+        timeout=(5, 15),
+    )
+
+    response.raise_for_status()
+    result = response.json()
+
+    if not result.get("status"):
+        raise ValidationError(
+            result.get(
+                "message",
+                "Paystack checkout initialization failed.",
+            )
+        )
+
+    data = result.get("data") or {}
+
+    reference = data.get("reference")
+    checkout_url = data.get("authorization_url")
+
+    if not reference or not checkout_url:
+        raise ValidationError(
+            "Paystack did not return a payment reference "
+            "and checkout URL."
+        )
+
+    return {
+        "payment_reference": reference,
+        "transaction_reference": reference,
+        "checkout_url": checkout_url,
+        "amount": amount_kobo,
+    }
+
+
+def verify_paystack_webhook_signature(
     payload: bytes,
     signature: str | None,
 ) -> bool:
     """
-    Verifies Monnify webhook signatures using HMAC-SHA512
-    and the Monnify client secret.
-
-    Monnify sends this signature in production.
+    Verify a Paystack webhook signature using the raw
+    request body and the Paystack secret key.
     """
-
-    if settings.MONNIFY_ENVIRONMENT == "sandbox":
-        # Monnify documents that sandbox webhook requests
-        # do not include monnify-signature.
-        return True
 
     if not signature:
         return False
 
-    secret_key = settings.MONNIFY_SECRET_KEY
+    secret_key = settings.PAYSTACK_SECRET_KEY
 
     computed_signature = hmac.new(
         secret_key.encode("utf-8"),
@@ -418,7 +312,6 @@ def verify_monnify_webhook_signature(
         computed_signature,
         signature,
     )
-
 
 def fulfill_successful_order(order_hash: str):
     """

@@ -26,7 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config("DEBUG", default=False, cast=bool)
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -145,18 +145,26 @@ USE_I18N = True
 USE_TZ = True
 
 # Monnify settings
-MONNIFY_API_KEY = config("MONNIFY_API_KEY")
-MONNIFY_SECRET_KEY = config("MONNIFY_SECRET_KEY")
-MONNIFY_CONTRACT_CODE = config("MONNIFY_CONTRACT_CODE")
+# MONNIFY_API_KEY = config("MONNIFY_API_KEY")
+# MONNIFY_SECRET_KEY = config("MONNIFY_SECRET_KEY")
+# MONNIFY_CONTRACT_CODE = config("MONNIFY_CONTRACT_CODE")
 
-MONNIFY_BASE_URL = config(
-    "MONNIFY_BASE_URL",
-    default="https://sandbox.monnify.com"
-)
+# MONNIFY_BASE_URL = config(
+#     "MONNIFY_BASE_URL",
+#     default="https://sandbox.monnify.com"
+# )
 
-MONNIFY_ENVIRONMENT = config(
-    "MONNIFY_ENVIRONMENT",
-    default="sandbox"
+# MONNIFY_ENVIRONMENT = config(
+#     "MONNIFY_ENVIRONMENT",
+#     default="sandbox"
+# )
+
+# Paystack settings
+PAYSTACK_SECRET_KEY = config("PAYSTACK_SECRET_KEY")
+
+PAYSTACK_CALLBACK_URL = config(
+    "PAYSTACK_CALLBACK_URL",
+    default="https://chillandvibeshub.com/checkout",
 )
 
 # Static files (CSS, JavaScript, Images)
